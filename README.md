@@ -31,7 +31,7 @@ This will:
 ## Building
 
 ```bash
-cargo xtask bundle crimson-mute --release
+cargo run --package xtask --release -- bundle crimson-mute --release
 ```
 
 This builds the VST3, CLAP, and standalone executable.

@@ -38,7 +38,7 @@ jobs:
             libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
 
       - name: Build bundle
-        run: cargo xtask bundle crimson-mute --release
+        run: cargo run --package xtask --release -- bundle crimson-mute --release
 
       - name: Set platform name
         id: platform
