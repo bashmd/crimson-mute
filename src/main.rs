@@ -1,6 +1,6 @@
 use nih_plug::prelude::*;
 
-use anr_plugin::AnrPlugin;
+use crimson_mute::AnrPlugin;
 
 fn main() {
     nih_export_standalone::<AnrPlugin>();

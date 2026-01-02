@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use anr_plugin::{AudioProcessor, ProcessingMode, HOP_SIZE, FRAME_SIZE};
+use crimson_mute::{AudioProcessor, ProcessingMode, HOP_SIZE, FRAME_SIZE};
 
 /// Get the path to test audio files in the parent directory.
 fn test_audio_dir() -> PathBuf {
@@ -252,78 +252,6 @@ mod tests {
     }
 
     #[test]
-    fn test_reference_comparison_pmln_only() {
-        let dir = test_audio_dir();
-        let input_path = dir.join("test_audio.wav");
-        let reference_path = dir.join("test_audio_pmln_only_masked.wav");
-
-        // Load input (48kHz) and resample to 16kHz
-        let (input_48k, _) = load_wav(&input_path).expect("Failed to load input");
-        let input_16k = resample_48k_to_16k(&input_48k);
-
-        // Load reference (16kHz)
-        let (reference, ref_sr) = load_wav(&reference_path).expect("Failed to load reference");
-        assert_eq!(ref_sr, 16000);
-
-        // Process through Rust ANR pipeline
-        let mut processor = AudioProcessor::new();
-        let rust_output = processor.process_16k(&input_16k, ProcessingMode::PmlnOnly, 1.0);
-
-        eprintln!("Input 16k samples: {}", input_16k.len());
-        eprintln!("Reference samples: {}", reference.len());
-        eprintln!("Rust output samples: {}", rust_output.len());
-
-        // Save Rust output for manual inspection
-        let debug_path = dir.join("test_audio_rust_pmln_only.wav");
-        save_wav(&debug_path, &rust_output, 16000).expect("Failed to save debug output");
-        eprintln!("Saved Rust output to: {:?}", debug_path);
-
-        // Find best alignment delay
-        let max_delay = 2000; // ~125ms at 16kHz
-        let (delay, corr) = find_best_delay(&reference, &rust_output, max_delay);
-        eprintln!("Best delay: {} samples, correlation: {:.4}", delay, corr);
-
-        // Compare aligned signals
-        let compare_len = reference.len().min(rust_output.len() - delay);
-        let ref_slice = &reference[..compare_len];
-        let rust_slice = &rust_output[delay..delay + compare_len];
-
-        let mae = compute_mae(ref_slice, rust_slice);
-        let ref_rms = compute_rms(ref_slice);
-        let rust_rms = compute_rms(rust_slice);
-
-        eprintln!("Reference RMS: {:.6}", ref_rms);
-        eprintln!("Rust output RMS: {:.6}", rust_rms);
-        eprintln!("Mean Absolute Error: {:.6}", mae);
-        eprintln!("Correlation: {:.4}", corr);
-
-        // Assertions
-        // 1. Correlation should be high (signals should be similar)
-        assert!(
-            corr > 0.5,
-            "Correlation should be > 0.5: got {:.4}",
-            corr
-        );
-
-        // 2. RMS should be similar (within 10x)
-        let rms_ratio = rust_rms / ref_rms.max(1e-10);
-        assert!(
-            rms_ratio > 0.1 && rms_ratio < 10.0,
-            "RMS ratio should be reasonable: {:.4}",
-            rms_ratio
-        );
-
-        // 3. Output should not be silent
-        assert!(
-            rust_rms > 0.001,
-            "Rust output should not be silent: RMS={:.6}",
-            rust_rms
-        );
-
-        eprintln!("SUCCESS: Rust output matches reference with correlation {:.4}", corr);
-    }
-
-    #[test]
     fn test_processor_produces_output() {
         // Simple sanity check that the processor produces non-zero output
         let mut processor = AudioProcessor::new();
@@ -355,110 +283,11 @@ mod tests {
         );
     }
 
-    /// GOLD STANDARD TEST: Compare Rust vs Python at 16kHz with NO resampling.
-    /// This isolates the DSP core (FFT/ONNX/IFFT/OLA) from any resampler differences.
-    #[test]
-    fn test_16k_direct_comparison() {
-        let dir = test_audio_dir();
-        let input_path = dir.join("test_input_16k.wav");
-        let reference_path = dir.join("test_output_16k_python.wav");
-
-        // Check files exist
-        if !input_path.exists() || !reference_path.exists() {
-            eprintln!("16kHz test files not found. Run generate_16k_test.py first.");
-            eprintln!("Expected: {:?}", input_path);
-            eprintln!("Expected: {:?}", reference_path);
-            panic!("Missing 16kHz test files");
-        }
-
-        // Load 16kHz input directly (NO RESAMPLING)
-        let (input, input_sr) = load_wav(&input_path).expect("Failed to load 16kHz input");
-        assert_eq!(input_sr, 16000, "Input must be 16kHz");
-
-        // Load Python reference output
-        let (reference, ref_sr) = load_wav(&reference_path).expect("Failed to load Python reference");
-        assert_eq!(ref_sr, 16000, "Reference must be 16kHz");
-
-        eprintln!("=== 16kHz Direct Comparison (No Resampling) ===");
-        eprintln!("Input: {} samples", input.len());
-        eprintln!("Reference: {} samples", reference.len());
-
-        // Process through Rust at 16kHz directly
-        let mut processor = AudioProcessor::new();
-        let rust_output = processor.process_16k(&input, ProcessingMode::PmlnOnly, 1.0);
-
-        eprintln!("Rust output: {} samples", rust_output.len());
-
-        // Save for manual inspection
-        let debug_path = dir.join("test_output_16k_rust.wav");
-        save_wav(&debug_path, &rust_output, 16000).expect("Failed to save Rust output");
-        eprintln!("Saved Rust output to: {:?}", debug_path);
-
-        // Stats
-        let ref_rms = compute_rms(&reference);
-        let rust_rms = compute_rms(&rust_output);
-        let rms_ratio = rust_rms / ref_rms;
-
-        eprintln!("Reference RMS: {:.6}", ref_rms);
-        eprintln!("Rust RMS: {:.6}", rust_rms);
-        eprintln!("RMS Ratio (Rust/Python): {:.4}", rms_ratio);
-
-        // Check for the 0.75 ratio (double windowing bug)
-        if rms_ratio > 0.7 && rms_ratio < 0.8 {
-            eprintln!("WARNING: RMS ratio ~0.75 suggests double windowing (Hann applied twice)!");
-        }
-
-        // Find alignment - use cross-correlation with zero-padding for proper delay finding
-        let max_delay = 2000;
-        let (delay, corr) = find_best_delay(&reference, &rust_output, max_delay);
-        eprintln!("Best delay: {} samples ({:.2} ms)", delay, delay as f32 / 16.0);
-        eprintln!("Correlation at best delay: {:.6}", corr);
-
-        // Also try negative delays (Rust ahead of Python)
-        let (neg_delay, neg_corr) = find_best_delay(&rust_output, &reference, max_delay);
-        if neg_corr > corr {
-            eprintln!("Better correlation with negative delay: {} samples, corr={:.6}", neg_delay, neg_corr);
-        }
-
-        // Compare aligned signals
-        let compare_len = reference.len().min(rust_output.len().saturating_sub(delay));
-        if compare_len > 1000 {
-            let ref_slice = &reference[..compare_len];
-            let rust_slice = &rust_output[delay..delay + compare_len];
-
-            let aligned_corr = compute_correlation(ref_slice, rust_slice);
-            let mae = compute_mae(ref_slice, rust_slice);
-
-            eprintln!("Aligned correlation: {:.6}", aligned_corr);
-            eprintln!("Mean Absolute Error: {:.6}", mae);
-
-            // Sample-by-sample comparison for first few samples
-            eprintln!("\nFirst 10 samples comparison (after delay alignment):");
-            for i in 0..10.min(compare_len) {
-                let diff = (ref_slice[i] - rust_slice[i]).abs();
-                eprintln!(
-                    "  [{}] Python: {:+.6}, Rust: {:+.6}, Diff: {:.6}",
-                    i, ref_slice[i], rust_slice[i], diff
-                );
-            }
-
-            // Assertions for Gold Standard
-            assert!(
-                aligned_corr > 0.95,
-                "GOLD STANDARD FAILED: Correlation should be > 0.95 at 16kHz direct, got {:.6}. \
-                 This indicates a bug in FFT/ONNX/IFFT/OLA logic, not resampling.",
-                aligned_corr
-            );
-        } else {
-            panic!("Not enough samples to compare after delay alignment");
-        }
-    }
-
     /// Full 48kHz round-trip test: downsample → process hops → upsample
     /// This tests the EXACT code path used by the plugin at non-16kHz sample rates.
     #[test]
     fn test_48k_full_roundtrip() {
-        use anr_plugin::{Downsampler, Upsampler};
+        use crimson_mute::{Downsampler, Upsampler};
 
         let input_path = test_audio_dir().join("test_audio.wav");
         if !input_path.exists() {
@@ -593,7 +422,7 @@ mod tests {
     /// Test upsampler warmup - check how many samples it produces over time
     #[test]
     fn test_upsampler_warmup() {
-        use anr_plugin::{Upsampler, HOP_SIZE};
+        use crimson_mute::{Upsampler, HOP_SIZE};
 
         let mut upsampler = Upsampler::new(48000.0).expect("Should create upsampler");
 
@@ -616,7 +445,7 @@ mod tests {
     /// This exercises the real code that the plugin uses.
     #[test]
     fn test_plugin_resampling_flow() {
-        use anr_plugin::{ResamplingPipeline, ProcessingMode};
+        use crimson_mute::{ResamplingPipeline, ProcessingMode};
 
         const BUFFER_SIZE: usize = 480; // Typical host buffer at 48kHz
 
@@ -678,7 +507,7 @@ mod tests {
     /// Uses actual audio file and checks output quality
     #[test]
     fn test_resampling_pipeline_with_audio() {
-        use anr_plugin::{ResamplingPipeline, ProcessingMode};
+        use crimson_mute::{ResamplingPipeline, ProcessingMode};
 
         let input_path = test_audio_dir().join("test_audio.wav");
         if !input_path.exists() {

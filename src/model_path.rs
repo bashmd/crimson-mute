@@ -183,16 +183,6 @@ pub fn find_model_dir() -> Option<PathBuf> {
     None
 }
 
-/// Get the full path to PMLN_model.onnx
-pub fn pmln_model_path() -> Option<PathBuf> {
-    find_model_dir().map(|d| d.join(PMLN_MODEL))
-}
-
-/// Get the full path to STLN_model.onnx
-pub fn stln_model_path() -> Option<PathBuf> {
-    find_model_dir().map(|d| d.join(STLN_MODEL))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
