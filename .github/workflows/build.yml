@@ -71,14 +71,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: crimson-mute-standalone-linux
-          path: target/bundled/crimson-mute
+          path: target/release/crimson-mute
 
       - name: Upload Standalone (Windows)
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: crimson-mute-standalone-windows
-          path: target/bundled/crimson-mute.exe
+          path: target/release/crimson-mute.exe
 
   release:
     needs: build
