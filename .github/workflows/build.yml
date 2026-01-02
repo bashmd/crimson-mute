@@ -1,0 +1,104 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libx11-dev libgl1-mesa-dev pkg-config \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+
+      - name: Build bundle
+        run: cargo xtask bundle crimson-mute --release
+
+      - name: Set platform name
+        id: platform
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            echo "name=linux" >> $GITHUB_OUTPUT
+          else
+            echo "name=windows" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: crimson-mute-vst3-${{ steps.platform.outputs.name }}
+          path: target/bundled/*.vst3
+
+      - name: Upload CLAP
+        uses: actions/upload-artifact@v4
+        with:
+          name: crimson-mute-clap-${{ steps.platform.outputs.name }}
+          path: target/bundled/*.clap
+
+      - name: Upload Standalone (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: crimson-mute-standalone-linux
+          path: target/bundled/crimson-mute
+
+      - name: Upload Standalone (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: crimson-mute-standalone-windows
+          path: target/bundled/crimson-mute.exe
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Package releases
+        run: |
+          cd artifacts
+          for dir in */; do
+            name="${dir%/}"
+            zip -r "../${name}.zip" "$dir"
+          done
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "*.zip"
+          generate_release_notes: true
