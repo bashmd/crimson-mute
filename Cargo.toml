@@ -1,0 +1,41 @@
+[package]
+name = "crimson-mute"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "crimson-mute"
+path = "src/main.rs"
+
+[dependencies]
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug", features = ["standalone"] }
+realfft = "3"
+rustfft = "6"
+ort = "2.0.0-rc.4"
+ndarray = "0.15"
+multiversion = "0.7"
+rubato = "0.16"
+rtrb = "0.3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_LibraryLoader",
+] }
+
+[workspace]
+members = ["xtask"]
+
+[dev-dependencies]
+hound = "3.5"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(target_feature, values("retpoline", "retpoline-indirect-branches", "retpoline-indirect-calls"))'
+] }
